@@ -1,65 +1,84 @@
 ﻿using System.Globalization;
 using System.Text;
-using Microsoft.Data.Sqlite;
+using Npgsql;
 
 namespace Lab1;
 
 class Program
 {
-    static string ResolveDbPath()
-    {
-        var rootDb = Path.GetFullPath(Path.Combine(
-            AppContext.BaseDirectory,  "..", "..", "..", "..", "Db", "Db.db"
-        ));
-            return rootDb;
-        
-    }
-    
-    static void Main(string[] args)
+    private static void Main(string[] args)
     {
         Console.OutputEncoding = Encoding.UTF8;
         Console.InputEncoding  = Encoding.UTF8;
         var ua = CultureInfo.GetCultureInfo("uk-UA");
 
-        var dbPath = ResolveDbPath();
-        var cs = $"Data Source={dbPath}";
+        var cs = "Host=localhost;Port=5432;Username=postgres;Database=DbForUniversity;Password=andy;";
 
-        using var conn = new SqliteConnection(cs);
+        using var conn = new NpgsqlConnection(cs);
         conn.Open();
 
-        var sql = @"
-SELECT
-  o.Id AS OrderId,
-  o.OrderDate,
-  c.LastName || ' ' || c.FirstName AS ClientName,
-  p.Name AS PizzaName,
-  d.Quantity,
-  p.Price,
-  p.Discount,
-  ROUND(d.Quantity * p.Price * (1 - p.Discount/100.0), 2) AS LineTotal
-FROM Orders o
-JOIN Clients c      ON c.Id = o.ClientId
-JOIN OrderDetails d ON d.OrderId = o.Id
-JOIN Pizzas p       ON p.Id = d.PizzaId
-ORDER BY o.OrderDate, o.Id;";
+        const string sqlClients = @"
+            SELECT
+              clientid      ,
+              clientname    ,
+              phone         ,
+              orderscount  ,
+              firstorderdate ,
+              lastorderdate  
+            FROM v_clients_2plus_orders
+            ORDER BY orderscount DESC, clientname;";
 
-        using var cmd = new SqliteCommand(sql, conn);
-        using var rdr = cmd.ExecuteReader();
-        while (rdr.Read())
+        using (var cmd = new NpgsqlCommand(sqlClients, conn))
+        using (var rdr = cmd.ExecuteReader())
         {
-            var orderDate = Convert.ToString(rdr["OrderDate"]);
-            var orderId   = Convert.ToInt32(rdr["OrderId"]);
-            var client    = Convert.ToString(rdr["ClientName"]);
-            var pizza     = Convert.ToString(rdr["PizzaName"]);
-            var qty       = Convert.ToInt32(rdr["Quantity"]);
-            var price     = Convert.ToDecimal(rdr["Price"]);
-            var discount  = Convert.ToDecimal(rdr["Discount"]);
-            var lineTotal = Convert.ToDecimal(rdr["LineTotal"]);
+            Console.WriteLine("=== Клієнти (>=2 замовлення) ===");
+            while (rdr.Read())
+            {
+                var name      = rdr["clientname"];
+                var phone     = rdr["phone"];
+                var cnt       = rdr["orderscount"]; 
+                var firstDate = rdr["firstorderdate"];
+                var lastDate  = rdr["lastorderdate"];
 
-            Console.WriteLine(
-                $"{orderDate} | #{orderId} | {client} | {pizza} x{qty} | " +
-                $"{price.ToString("C0", ua)} (-{discount:0}% ) → {lineTotal.ToString("C0", ua)}"
-            );
+                Console.WriteLine(
+                    $"{name} | {phone} | Замовлень: {cnt} | " +
+                    $"Перше: {firstDate} | Останнє: {lastDate} |"
+                );
+            }
+        }
+
+        const string sqlLines = @"
+            SELECT
+              orderdate   ,
+              clientid    ,
+              client_name ,
+              pizza_name  ,
+              quantity    ,
+              price       ,
+              discount   ,
+              linetotal   
+            FROM v_order_lines
+            ORDER BY orderdate, orderid;";
+
+        using (var cmd2 = new NpgsqlCommand(sqlLines, conn))
+        using (var rdr2 = cmd2.ExecuteReader())
+        {
+            Console.WriteLine("\n=== Таблиця замовлень ===");
+            while (rdr2.Read())
+            {
+                var orderDate = rdr2["orderdate"];
+                var client    = rdr2["client_name"];
+                var pizza     = rdr2["pizza_name"];
+                var qty       = rdr2["quantity"];
+                var price     = rdr2["price"];
+                var discount  = rdr2["discount"];
+                var total     = rdr2["linetotal"];
+
+                Console.WriteLine(
+                    $"{orderDate} | {client} | {pizza} x{qty} | " +
+                    $"{price} (-{discount:0.#}% ) → {total} |"
+                );
+            }
         }
     }
 }
